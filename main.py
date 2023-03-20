@@ -11,13 +11,16 @@ FPS = 60
 WINDOW_WIDTH =  800
 WINDOW_HEIGHT = 900
 
-SQUARE_SIZE = 50
+SQUARE_SIZE = 20
 
 GUI_WIDTH = WINDOW_WIDTH
 GUI_HEIGHT = 100
 
+SETTINGS_WIDTH = WINDOW_WIDTH
+SETTINGS_HEIGHT = 100
+
 GRID_WIDTH = WINDOW_WIDTH
-GRID_HEIGHT = WINDOW_HEIGHT - GUI_HEIGHT
+GRID_HEIGHT = WINDOW_HEIGHT - GUI_HEIGHT - SETTINGS_HEIGHT
 
 BUTTON_FONT = pygame.font.SysFont('Comic Sans MS', 30)
 
@@ -105,6 +108,42 @@ class Surface:
     def contains(self, x, y):
         return (self.x <= x <= self.x+self.width) and (self.y <= y <= self.y+self.height)
 
+class NumberEdit(Surface):
+    def __init__(self, width, height, x, y, default=1, bg=(0, 0, 0)):
+        super().__init__(width, height, x, y)
+        self._value = default
+        self.background_color = bg
+        self.text_area = None
+        self.create_text_area()
+        self.up_button = Button(3*self.width//4, self.height//2, self.x + self.width//4, self.y, (100, 100, 0), text="Up")
+        self.down_button = Button(3*self.width//4, self.height//2, self.x + self.width//4, self.y + self.height//2, (100, 0, 100), text="Down")
+
+    def create_text_area(self):
+        self.text_area = BUTTON_FONT.render(str(self._value), False, (255, 255, 255))
+
+    @property
+    def value(self):
+        return self._value
+
+    @value.setter
+    def value(self, val):
+        self._value = val
+        self.create_text_area()
+
+    def handle_mouse_down(self, x, y):
+        if self.down_button.contains(x, y):
+            self.value = max(self._value-1, 1)
+        elif self.up_button.contains(x, y):
+            self.value = min(self._value+1, 9)
+        self.create_text_area()
+
+    def draw(self, window: pygame.Surface):
+        pygame.draw.rect(window, self.background_color, (self.x, self.y, self.width, self.height))
+        window.blit(self.text_area, (self.x + self.width//8 - self.text_area.get_width()//2, self.y + self.height//2 - self.text_area.get_height()//2))
+        self.up_button.draw(window)
+        self.down_button.draw(window)
+
+
 class GridSurface(Surface):
     def __init__(self, width: int, height: int, x: int, y: int, square_size: int, board: Board):
         super().__init__(width, height, x, y)
@@ -160,7 +199,7 @@ class GridSurface(Surface):
         self.operation = None
 
     def handle_mouse_move(self, x, y, down_x, down_y):
-        row, col = self.get_row_col(max(self.x, min(x, self.x+self.width)), max(self.y, min(y, self.y+self.height)))
+        row, col = self.get_row_col(max(self.x, min(x, self.x+self.width-1)), max(self.y, min(y, self.y+self.height-1)))
         self.fill_square(row, col)
 
 class Button(Surface):
@@ -178,7 +217,7 @@ class Button(Surface):
     def draw(self, window: pygame.Surface):
         pygame.draw.rect(window, self.color, (self.x, self.y, self.width, self.height))
         if self.text_area:
-            window.blit(self.text_area, (self.x+(self.width//4), self.y+(self.height//4), self.width//2, self.height//2))
+            window.blit(self.text_area, (self.x+(self.width//2)-self.text_area.get_width()//2, self.y+(self.height//2)-self.text_area.get_height()//2))
        
 
 
@@ -187,8 +226,8 @@ class GUISurface(Surface):
         super().__init__(width, height, x, y)
         self.start_callback = None
         self.clear_callback = None
-        self.clear = Button(width//3, height//2, x, y+height//4, (100, 100, 0), text="Clear")
-        self.start = Button(width//3, height//2, x+2*width//3, y+height//4, (200, 0, 200), text="Start")
+        self.clear = Button(width//3, height//2, x+(self.width//12), y+height//4, (100, 100, 0), text="Clear")
+        self.start = Button(width//3, height//2, x+7*width//12, y+height//4, (200, 0, 200), text="Start")
 
     def set_start_callback(self, callback):
         self.start_callback = callback
@@ -213,16 +252,42 @@ class IPathFinder:
     def generate_steps(self, board: Board) -> tuple[list, dict]:
         ...
 
+class Settings(Surface):
+
+    def __init__(self, width: int, height: int, x, y):
+        super().__init__(width, height, x, y)
+        self.dist = NumberEdit(width//8, height//2, x+2*width//8, y+height//4)
+        self.heur = NumberEdit(width//8, height//2, x+width-3*width//8, y+height//4)
+        self.dist_label = BUTTON_FONT.render('Cost weight', False,          (100, 255, 0))
+        self.heur_label = BUTTON_FONT.render('Distance left weight', False, (100, 255, 0))
+
+    def draw(self, window: pygame.Surface):
+        pygame.draw.rect(window, (0, 0, 255), (self.x, self.y, self.width, self.height))
+        window.blit(self.dist_label, (self.dist.x, self.y))
+        window.blit(self.heur_label, (self.heur.x, self.y))
+        self.dist.draw(window)
+        self.heur.draw(window)
+
+    def handle_mouse_down(self, x, y):
+        if self.dist.contains(x, y):
+            self.dist.handle_mouse_down(x, y)
+        elif self.heur.contains(x, y):
+            self.heur.handle_mouse_down(x, y)
+
+    def get_dist_heur(self):
+        return self.dist.value, self.heur.value
+
 class App:
     def __init__(self, path_finder: IPathFinder):
         self.window = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
         pygame.display.set_caption('A* visualization')
         self.clock = pygame.time.Clock()
-        self.gui = GUISurface(GUI_WIDTH, GUI_HEIGHT, 0, 0)
         self.board = Board(GRID_HEIGHT//SQUARE_SIZE, GRID_WIDTH//SQUARE_SIZE)
         self.board.set_start(self.board.rows//2, self.board.cols//4)
         self.board.set_stop(self.board.rows//2, 3*self.board.cols//4)
+        self.gui = GUISurface(GUI_WIDTH, GUI_HEIGHT, 0, 0)
         self.grid = GridSurface(GRID_WIDTH, GRID_HEIGHT, 0, GUI_HEIGHT, SQUARE_SIZE, self.board)
+        self.settings = Settings(SETTINGS_WIDTH, SETTINGS_HEIGHT, 0, GUI_HEIGHT + GRID_HEIGHT)
         self.gui.set_start_callback(self.find_path)
         self.gui.set_clear_callback(self.clear)
         self.running  = False
@@ -255,7 +320,8 @@ class App:
     def find_path(self):
         self.clear_path()
         self.mode = 'pathfinder'
-        results = self.path_finder.generate_steps(self.board)
+        dist, heur = self.settings.get_dist_heur()
+        results = self.path_finder.generate_steps(self.board, dist, heur)
         if results == None:
             self.mode = 'user'
             return
@@ -280,6 +346,8 @@ class App:
                         if self.mode == 'end':
                             self.clear()
                         self.grid.handle_mouse_down(x, y)
+                    if self.settings.contains(x, y):
+                        self.settings.handle_mouse_down(x, y)
                     mouse_down = True
                     mouse_down_pos = (x, y)
                 if mouse_down and event.type == pygame.MOUSEMOTION:
@@ -300,6 +368,7 @@ class App:
             self.draw_steps()
         self.gui.draw(self.window)
         self.grid.draw(self.window)
+        self.settings.draw(self.window)
                 
     def draw_steps(self):
         if self.current_step < len(self.steps):
@@ -319,8 +388,8 @@ class App:
 
 
 class AStar(IPathFinder):
-    def generate_steps(self, board: Board):
-        COST_W, HEUR_W = 1, 1
+    def generate_steps(self, board: Board, dist, heur):
+        COST_W, HEUR_W = dist, heur
         start = board.start
         stop = board.stop
         frontier = PriorityQueue()
